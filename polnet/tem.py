@@ -38,21 +38,18 @@ class TEM:
         self.__rec3d_file = self.__work_dir + "/out_rec3d.mrc"
 
     def __create_work_dir(self):
-        """
-        Create the working directory
-        """
+        """Create the working directory"""
         if not os.path.exists(self.__work_dir):
-            os.mkdir(self.__work_dir)
-
+            os.makedirs(self.__work_dir, exist_ok=True)
+            
     def __save_tangs_file(self, angs):
         """
         Stores the tilt angles file according IMOD format
-
         :param angs: non-empty iterable with the tilt angles
         """
         with open(self.__tangs_file, "w") as file:
             for ang in angs:
-                file.write(str(ang) + "\n")
+                file.write(f"{float(ang):.1f}\n")
 
     def __load_tangs_file(self):
         """
@@ -66,6 +63,16 @@ class TEM:
                 angs.append(float(line.strip()))
         return np.asarray(angs)
 
+    def __format_tilt_angles(self, angs):
+        """
+        Format tilt angles for command line usage
+        :param angs: iterable of angles or range object
+        :return: properly formatted string of angles
+        """
+        if isinstance(angs, range):
+            return f"{angs.start},{angs.stop},{angs.step}"
+        return ",".join(f"{float(ang):.1f}" for ang in angs)
+
     def gen_tilt_series_imod(self, vol, angs, ax="X", mode="real"):
         """
         Generates the 2D projection series from a 3D volume using 'xyzproj' IMOD binary
@@ -75,59 +82,67 @@ class TEM:
         :param ax: tilt axis, either 'X', 'Y' or 'Z' (default 'X')
         :param mode: mode of output file, valid: 'byte', 'int' or 'real' (default)
         """
+        # Input validation
+        if not isinstance(vol, np.ndarray) or len(vol.shape) != 3:
+            raise ValueError("Volume must be a 3D numpy array")
+        if not hasattr(angs, "__len__") or len(angs) == 0:
+            raise ValueError("Angles must be a non-empty iterable")
+        if ax not in ["X", "Y", "Z"]:
+            raise ValueError("Axis must be 'X', 'Y', or 'Z'")
+        if mode not in ["byte", "int", "real"]:
+            raise ValueError("Mode must be 'byte', 'int', or 'real'")
 
-        # Input parsing
-        assert isinstance(vol, np.ndarray) and (len(vol.shape) == 3)
-        assert hasattr(angs, "__len__") and (len(angs) > 0)
-        assert (ax == "X") or (ax == "Y") or (ax == "Z")
-        assert (mode == "byte") or (mode == "int") or (mode == "real")
+        # Save input volume
+        lio.write_mrc(vol, self.__vol_file)
 
-        # Call to IMOD binary (xyzproj)
+        # Build command with proper argument separation
+        cmd = [
+            IMOD_CMD_XYZPROJ,
+            "-inp", self.__vol_file,
+            "-o", self.__micgraphs_file,
+            "-ax", ax
+        ]
 
-        # Building the command
-        xyzproj_cmd = [IMOD_CMD_XYZPROJ]
-        in_vol_path = self.__vol_file
-        lio.write_mrc(vol, in_vol_path)
-        xyzproj_cmd += ["-inp", in_vol_path]
-        out_vol_path = self.__micgraphs_file
-        xyzproj_cmd += ["-o", out_vol_path]
-        xyzproj_cmd += ["-ax", ax]
+        # Add tilt angles with proper formatting
         if isinstance(angs, range):
-            xyzproj_cmd += ["-an"]
-            tangles = (
-                str(angs.start) + "," + str(angs.stop) + "," + str(angs.step)
-            )
+            cmd.extend(["-an", self.__format_tilt_angles(angs)])
         else:
-            xyzproj_cmd += ["-ta"]
-            tangles = str(angs[0])
-            for i in range(1, len(angs)):
-                tangles += "," + str(angs[i])
-        xyzproj_cmd += [tangles]
-        if mode == "byte":
-            xyzproj_cmd += ["-m", "0"]
-        elif mode == "int":
-            xyzproj_cmd += ["-m", "1"]
-        elif mode == "real":
-            xyzproj_cmd += ["-m", "2"]
+            cmd.extend(["-ta", self.__format_tilt_angles(angs)])
 
-        # Command calling
+        # Add mode as separate argument
+        mode_map = {"byte": "0", "int": "1", "real": "2"}
+        cmd.extend(["-m", mode_map[mode]])
+
+        # Execute command
         try:
-            with open(self.__log_file, "a") as file_log:
-                file_log.write(
-                    "\n["
-                    + time.strftime("%c")
-                    + "]RUNNING COMMAND:-> "
-                    + " ".join(xyzproj_cmd)
-                    + "\n"
+            with open(self.__log_file, "a") as log_file:
+                log_file.write(f"\n[{time.strftime('%c')}]RUNNING COMMAND:-> {' '.join(cmd)}\n")
+                result = subprocess.run(
+                    cmd,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    check=True,
+                    text=True
                 )
-                subprocess.call(xyzproj_cmd, stdout=file_log, stderr=file_log)
+
+            # Save tilt angles file if command succeeded
             self.__save_tangs_file(angs)
-        except subprocess.CalledProcessError:
-            print("ERROR: Error calling the command:", xyzproj_cmd)
-            raise subprocess.CalledProcessError
-        except IOError:
-            print("ERROR: Log file could not be written:", self.__log_file)
-            raise IOError
+            
+            # Verify output file exists and is non-empty
+            if not os.path.exists(self.__micgraphs_file):
+                raise RuntimeError(f"Output file not created: {self.__micgraphs_file}")
+            if os.path.getsize(self.__micgraphs_file) == 0:
+                raise RuntimeError(f"Output file is empty: {self.__micgraphs_file}")
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error running IMOD command: {' '.join(cmd)}")
+            print(f"Return code: {e.returncode}")
+            if e.output:
+                print(f"Output: {e.output}")
+            raise
+        except IOError as e:
+            print(f"I/O error during command execution: {e}")
+            raise
 
     def add_detector_noise(self, snr):
         """
