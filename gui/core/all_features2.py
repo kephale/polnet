@@ -802,4 +802,26 @@ def all_features2(
     # Storing tomograms CSV file
     set_stomos.save_csv(OUT_DIR + "/tomos_motif_list.csv")
 
+    # Extract coordinates and metadata 
+    all_coordinates = []
+    all_orientations = []
+    all_labels = []
+    
+    # Go through each tomogram and network to extract coordinates
+    for tomo in set_stomos.get_tomos():
+        for entity_id, network in enumerate(tomo._SynthTomo__networks, start=1):
+            for polymer in network.get_pmers_list():
+                for monomer in polymer._Polymer__m:
+                    all_coordinates.append(monomer.get_center_mass())
+                    all_orientations.append(monomer.get_quaternion())
+                    all_labels.append(entity_id)
+
+    feature_data = {
+        'coordinates': np.array(all_coordinates),
+        'orientations': np.array(all_orientations), 
+        'labels': np.array(all_labels)
+    }
+
     print("Successfully terminated. (" + time.strftime("%c") + ")")
+    
+    return feature_data
