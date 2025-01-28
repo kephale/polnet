@@ -809,12 +809,12 @@ def all_features2(
     
     # Go through each tomogram and network to extract coordinates
     for tomo in set_stomos._SetTomos__tomos:
-        for entity_id, network in enumerate(tomo._SynthTomo__networks, start=1):
-            for polymer in network.get_pmers_list():
-                for monomer in polymer._Polymer__m:
-                    all_coordinates.append(monomer.get_center_mass())
-                    all_orientations.append(monomer.get_quaternion())
-                    all_labels.append(entity_id)
+        # Extract directly from motifs which has format:
+        # (m_type, lbl, code, pmer_id, center_coords, rotation)
+        for motif in tomo.get_motif_list():
+            all_coordinates.append(motif[4])  # Center coordinates
+            all_orientations.append(motif[5])  # Rotation quaternion
+            all_labels.append(motif[1])  # Label ID
 
     feature_data = {
         'coordinates': np.array(all_coordinates),
