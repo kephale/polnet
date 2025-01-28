@@ -808,7 +808,7 @@ def all_features2(
     all_labels = []
     
     # Go through each tomogram and network to extract coordinates
-    for tomo in set_stomos.get_tomos():
+    for tomo in set_stomos._SetTomos__tomos:
         for entity_id, network in enumerate(tomo._SynthTomo__networks, start=1):
             for polymer in network.get_pmers_list():
                 for monomer in polymer._Polymer__m:
